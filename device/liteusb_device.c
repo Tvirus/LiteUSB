@@ -1041,7 +1041,7 @@ static void setup_get_status(unsigned int dev_idx, const usb_setup_data_t *setup
             }
         }
         ep = &dev->active_eps[dir][ep_num];
-        if (0 == ep->used)
+        if (ep_num && (0 == ep->used))
         {
             lusbd_ep_set_halt(dev_idx, 0, 0);
             LUSBD_INFO("Dev(%u) setup get_status endpoint invalid, dir:%u num:%u, ep0 halted", dev_idx, dir, ep_num);
