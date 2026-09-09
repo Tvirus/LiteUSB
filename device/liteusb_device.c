@@ -393,7 +393,7 @@ int lusbd_add_endpoint(unsigned int class_idx, unsigned int if_num, uint8_t alt_
     ep_count++;
 
     LUSBD_DEBUG("Add endpoint, class_idx:%u if_num:%u alt_num:%u dir:%u ep_num:%u type:%u mps:%u",
-        class_idx, ep->if_num, alt_num, dir, ep->ep_num, type, mps);
+                class_idx, ep->if_num, alt_num, dir, ep->ep_num, type, mps);
     return 0;
 }
 
@@ -498,7 +498,7 @@ static int lusbd_update_dev_desc(unsigned int dev_idx)
             count++;
     }
     dev->dev_qualifier_desc.bLength = sizeof(usb_device_qualifier_descriptor_t);
-    dev->dev_qualifier_desc.bDescriptorType = USB_DESC_TYPE_DEVICE;
+    dev->dev_qualifier_desc.bDescriptorType = USB_DESC_TYPE_DEVICE_QUALIFIER;
     dev->dev_qualifier_desc.bcdUSB_l = 0x00;
     dev->dev_qualifier_desc.bcdUSB_h = 0x02;
     dev->dev_qualifier_desc.bDeviceClass = IAD_DEV_CLASS;
@@ -1279,6 +1279,12 @@ static void get_config_desc(unsigned int dev_idx, const usb_setup_data_t *setup_
         return;
     }
     cfg = &lusbd_cfg_list[i];
+#if LUSBD_MAX_SPEED == LUSBD_HIGH_SPEED
+    if (other_speed)
+        cfg->cfg_desc.bDescriptorType = USB_DESC_TYPE_OTHER_SPEED_CONFIGURATION;
+    else
+        cfg->cfg_desc.bDescriptorType = USB_DESC_TYPE_CONFIGURATION;
+#endif
     total_length = (cfg->cfg_desc.wTotalLength_h << 8) | cfg->cfg_desc.wTotalLength_l;
     if (total_length < data_len)
         lusbd_ep_tx(dev_idx, 0, cfg->cfg_desc_buf, total_length, 1);
