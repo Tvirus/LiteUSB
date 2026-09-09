@@ -1,0 +1,25 @@
+#ifndef _LITEUSB_HAL_CFG_H_
+#define _LITEUSB_HAL_CFG_H_
+
+#include "stm32u5xx_hal.h"
+
+
+#define LUSBD_DEV_COUNT  1
+#define LUSBD_MAX_PACKET_SIZE_EP0  USB_OTG_MAX_EP0_SIZE
+#define LUSBD_MAX_PACKET_SIZE_FS_BULK  64
+#define LUSBD_SPT_REMOTE_WAKEUP
+
+#ifdef USB_OTG_HS
+#define LUSBD_MAX_SPEED  LUSBD_HIGH_SPEED
+#define LUSBD_IN_EP_MAX_NUM  8
+#define LUSBD_OUT_EP_MAX_NUM  8
+#else
+#define LUSBD_MAX_SPEED  LUSBD_FULL_SPEED
+#define LUSBD_IN_EP_MAX_NUM  5
+#define LUSBD_OUT_EP_MAX_NUM  5
+#endif
+
+#define USB_EP_DIR_INDEPENDENT
+
+
+#endif
