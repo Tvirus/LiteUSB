@@ -435,7 +435,7 @@ HALT:
     return;
 }
 
-static void acm_data_out_cb(unsigned int dev_idx, uint8_t *buf, unsigned int len, void *class_data)
+static void acm_data_out_cb(unsigned int dev_idx, unsigned int ep_num, uint8_t *buf, unsigned int len, void *class_data)
 {
     cdcacmd_t *cdcacmd;
 
@@ -445,7 +445,7 @@ static void acm_data_out_cb(unsigned int dev_idx, uint8_t *buf, unsigned int len
     return;
 }
 
-static void acm_data_in_complete_cb(unsigned int dev_idx, void *class_data)
+static void acm_data_in_complete_cb(unsigned int dev_idx, unsigned int ep_num, void *class_data)
 {
     cdcacmd_t *cdcacmd;
 

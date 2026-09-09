@@ -1702,7 +1702,7 @@ void lusbd_data_in_handler(unsigned int dev_idx, unsigned int ep_num)
         {
             cls = &lusbd_class_list[ep->class_idx];
             if (cls->cb && cls->cb->data_in_complete)
-                cls->cb->data_in_complete(dev_idx, cls->class_data);
+                cls->cb->data_in_complete(dev_idx, ep_num, cls->class_data);
         }
     }
     else
@@ -1762,7 +1762,7 @@ void lusbd_data_out_handler(unsigned int dev_idx, unsigned int ep_num, uint8_t *
         ep = &dev->active_eps[0][ep_num];
         cls = &lusbd_class_list[ep->class_idx];
         if (cls->cb && cls->cb->data_out)
-            cls->cb->data_out(dev_idx, buf, recv_len, cls->class_data);
+            cls->cb->data_out(dev_idx, ep_num, buf, recv_len, cls->class_data);
     }
     else
     {

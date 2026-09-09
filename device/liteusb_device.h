@@ -42,8 +42,8 @@ typedef struct
     void (*activate)(unsigned int dev_idx, unsigned int is_hs, void *class_data);
     void (*deactivate)(unsigned int dev_idx, void *class_data);
     void (*setup)(unsigned int dev_idx, const usb_setup_data_t *setup_data, void *class_data);
-    void (*data_out)(unsigned int dev_idx, uint8_t *buf, unsigned int len, void *class_data);
-    void (*data_in_complete)(unsigned int dev_idx, void *class_data);
+    void (*data_out)(unsigned int dev_idx, unsigned int ep_num, uint8_t *buf, unsigned int len, void *class_data);
+    void (*data_in_complete)(unsigned int dev_idx, unsigned int ep_num, void *class_data);
 } lusbd_class_cb_t;
 
 #define LUSBD_USER_EVENT_CONNECTED     1
