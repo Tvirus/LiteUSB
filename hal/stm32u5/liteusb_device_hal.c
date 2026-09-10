@@ -1,5 +1,6 @@
 #include "liteusb_device_hal.h"
 #include "liteusb_hal_cfg.h"
+#include <string.h>
 
 
 
@@ -9,6 +10,11 @@
  */
 
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
+
+static unsigned int ep0_rx_total_len = 0;
+static unsigned int ep0_rx_remaining_len = 0;
+static uint8_t *ep0_rx_addr = NULL;
+static uint8_t ep0_rx_buf[LUSBD_MAX_PACKET_SIZE_EP0] __attribute__((aligned(4)));
 
 
 int lusbd_hal_start_device(unsigned int dev_idx)
@@ -27,14 +33,6 @@ int lusbd_hal_stop_device(unsigned int dev_idx)
         return -1;
     return 0;
 }
-
-//unsigned int lusbd_get_enum_speed(unsigned int dev_idx)
-//{
-//    if (USBD_FS_SPEED == hpcd_USB_OTG_FS.Init.speed)
-//        return LUSBD_FULL_SPEED;
-//    else
-//        return LUSBD_LOW_SPEED;
-//}
 
 int lusbd_hal_ep_open(unsigned int dev_idx, unsigned int dir, unsigned int num, unsigned int mps, unsigned int type)
 {
@@ -74,16 +72,40 @@ int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int num, void *buf, unsigned 
 {
     unsigned int mps;
 
-    mps = hpcd_USB_OTG_FS.OUT_ep[num].maxpacket;
-    if (0 == mps)
-        return -1;
-    if (num && (len % mps))
+    if (num)
     {
-        LUSBD_ERROR("Dev(%u) out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", dev_idx, num, len, mps);
-        return -1;
+        mps = hpcd_USB_OTG_FS.OUT_ep[num].maxpacket;
+        if (0 == mps)
+            return -1;
+        if (len % mps)
+        {
+            LUSBD_ERROR("STM32U5 out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", num, len, mps);
+            return -1;
+        }
+        if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
+            return -1;
     }
-    if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
-        return -1;
+    else
+    {
+        ep0_rx_total_len = len;
+        ep0_rx_remaining_len = len;
+        ep0_rx_addr = (uint8_t *)buf;
+        if (0 == len)
+        {
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, 0))
+                return -1;
+        }
+        else if (LUSBD_MAX_PACKET_SIZE_EP0 > len)
+        {
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0))
+                return -1;
+        }
+        else
+        {
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_addr, LUSBD_MAX_PACKET_SIZE_EP0))
+                return -1;
+        }
+    }
     return 0;
 }
 
@@ -273,5 +295,45 @@ void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
     unsigned int recv_len;
 
     recv_len = HAL_PCD_EP_GetRxCount(hpcd, epnum);
-    lusbd_data_out_handler(0, epnum, hpcd->OUT_ep[epnum].xfer_buff - recv_len, recv_len);
+
+    if (epnum)
+    {
+        lusbd_data_out_handler(0, epnum, hpcd->OUT_ep[epnum].xfer_buff - recv_len, recv_len);
+        return;
+    }
+
+    if (LUSBD_MAX_PACKET_SIZE_EP0 < recv_len)
+    {
+        lusbd_ep_set_halt(0, 0, 0);
+        LUSBD_ERROR("STM32U5 ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, LUSBD_MAX_PACKET_SIZE_EP0);
+        return;
+    }
+    if (ep0_rx_remaining_len < recv_len)
+    {
+        lusbd_ep_set_halt(0, 0, 0);
+        LUSBD_ERROR("STM32U5 ep0 recv len(%u) exceeds expected len(%u), ep0 halted",
+                    ep0_rx_total_len - ep0_rx_remaining_len + recv_len, ep0_rx_total_len);
+        return;
+    }
+    if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
+    {
+        if (ep0_rx_addr)
+            memcpy(ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, ep0_rx_buf, recv_len);
+        lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
+    }
+    else
+    {
+        if ((LUSBD_MAX_PACKET_SIZE_EP0 > recv_len) || (LUSBD_MAX_PACKET_SIZE_EP0 == ep0_rx_remaining_len))
+        {
+            lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
+        }
+        else
+        {
+            ep0_rx_remaining_len -= LUSBD_MAX_PACKET_SIZE_EP0;
+            if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
+                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0);
+            else
+                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, LUSBD_MAX_PACKET_SIZE_EP0);
+        }
+    }
 }
