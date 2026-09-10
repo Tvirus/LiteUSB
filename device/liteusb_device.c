@@ -683,6 +683,21 @@ static int lusbd_activate_ep(unsigned int dev_idx, unsigned int if_num, unsigned
 
 
 
+int lusbd_get_device_info(unsigned int dev_idx, lusbd_device_info_t *info)
+{
+    lusbd_dev_t *dev;
+
+    if ((LUSBD_DEV_COUNT <= dev_idx) || (NULL == info))
+        return -1;
+    dev = &lusbd_dev_list[dev_idx];
+
+    info->dev_state = dev->dev_state;
+    info->suspend = dev->suspend;
+    info->enum_speed = dev->enum_speed;
+    info->cur_cfg_val = dev->cur_cfg_val;
+    return 0;
+}
+
 int lusbd_start_device(unsigned int dev_idx)
 {
     if (LUSBD_DEV_COUNT <= dev_idx)

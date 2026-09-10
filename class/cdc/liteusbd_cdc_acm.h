@@ -4,6 +4,10 @@
 #include "liteusb_device.h"
 
 
+#define CDCACM_RX_MPS_FS  LUSBD_MAX_PACKET_SIZE_FS_BULK
+#define CDCACM_RX_MPS_HS  USB_EP_MAX_PACKET_SIZE_HS_BULK
+
+
 #define SERIAL_CONFIG_STOP_BIT_1    0
 #define SERIAL_CONFIG_STOP_BIT_1_5  1
 #define SERIAL_CONFIG_STOP_BIT_2    2

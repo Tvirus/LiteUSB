@@ -53,6 +53,14 @@ typedef struct
 #define LUSBD_USER_EVENT_RESUMED       5
 typedef void (*lusbd_user_cb_t)(unsigned int dev_idx, unsigned int event);
 
+typedef struct
+{
+    uint8_t dev_state;
+    uint8_t suspend;
+    uint8_t enum_speed;
+    uint8_t cur_cfg_val;
+} lusbd_device_info_t;
+
 
 int lusbd_add_str(const uint8_t *buf, unsigned int len);
 int lusbd_set_dev_info(unsigned int dev_idx, uint16_t vid, uint16_t pid, uint16_t ver, unsigned int i_mf, unsigned int i_prod, unsigned int i_sn);
@@ -65,6 +73,7 @@ int lusbd_add_endpoint(unsigned int class_idx, unsigned int if_num, uint8_t alt_
 int lusbd_add_descriptor(unsigned int class_idx, const uint8_t *desc, unsigned int len);
 void lusbd_print_res_usage(void);
 
+int lusbd_get_device_info(unsigned int dev_idx, lusbd_device_info_t *info);
 int lusbd_start_device(unsigned int dev_idx);
 int lusbd_stop_device(unsigned int dev_idx);
 int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int num);

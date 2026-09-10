@@ -72,6 +72,16 @@ int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int num, const void *buf, uns
 
 int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int num, void *buf, unsigned int len)
 {
+    unsigned int mps;
+
+    mps = hpcd_USB_OTG_FS.OUT_ep[num].maxpacket;
+    if (0 == mps)
+        return -1;
+    if (num && (len % mps))
+    {
+        LUSBD_ERROR("Dev(%u) out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", dev_idx, num, len, mps);
+        return -1;
+    }
     if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
         return -1;
     return 0;
