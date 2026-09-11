@@ -215,7 +215,7 @@ int lusbd_hal_init_eps(unsigned int dev_idx, const lusbd_ep_t *out_ep_list, unsi
             continue;
         if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, i, ep->max_packet_size, ep->type))
         {
-            LUSBD_ERROR("Open out ep(%u) failed", i);
+            LUSBD_ERROR("Open OUT ep(%u) failed", i);
             return -1;
         }
     }
@@ -226,7 +226,7 @@ int lusbd_hal_init_eps(unsigned int dev_idx, const lusbd_ep_t *out_ep_list, unsi
             continue;
         if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, i | 0x80, ep->max_packet_size, ep->type))
         {
-            LUSBD_ERROR("Open in ep(%u) failed", i);
+            LUSBD_ERROR("Open IN ep(%u) failed", i);
             return -1;
         }
     }
@@ -282,6 +282,14 @@ void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
 
 void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
 {
+    uint32_t USBx_BASE = (uint32_t)hpcd->Instance;
+
+    /* Cancel any pending EP0 IN transfer */
+    USBx_DEVICE->DIEPEMPMSK &= ~1U;
+    HAL_PCD_EP_Abort(hpcd, 0x80);
+    CLEAR_IN_EP_INTR(0, USB_OTG_DIEPINT_EPDISD | USB_OTG_DIEPINT_XFRC);
+    HAL_PCD_EP_Flush(hpcd, 0x80);
+
     lusbd_setup_handler(0, (uint8_t *)hpcd->Setup);
 }
 
