@@ -359,7 +359,8 @@ int lusbd_add_endpoint(unsigned int class_idx, unsigned int if_num, uint8_t alt_
     {
         if ((LUSBD_OUT_EP_MAX_NUM - ep_class->out_ep_num_base) < ep_num)
         {
-            LUSBD_ERROR("Failed to add endpoint, out endpoint num(%u+%u) exceeds the max(%u)", ep_class->out_ep_num_base, ep_num, LUSBD_OUT_EP_MAX_NUM);
+            LUSBD_ERROR("Failed to add endpoint, OUT endpoint num(%u+%u) exceeds the max(%u)",
+                        ep_class->out_ep_num_base, ep_num, LUSBD_OUT_EP_MAX_NUM);
             return -1;
         }
         ep->ep_num = ep_class->out_ep_num_base + ep_num;
@@ -372,7 +373,7 @@ int lusbd_add_endpoint(unsigned int class_idx, unsigned int if_num, uint8_t alt_
     {
         if ((LUSBD_IN_EP_MAX_NUM - ep_class->in_ep_num_base) < ep_num)
         {
-            LUSBD_ERROR("Failed to add endpoint, in endpoint num(%u+%u) exceeds the max(%u)", ep_class->in_ep_num_base, ep_num, LUSBD_IN_EP_MAX_NUM);
+            LUSBD_ERROR("Failed to add endpoint, IN endpoint num(%u+%u) exceeds the max(%u)", ep_class->in_ep_num_base, ep_num, LUSBD_IN_EP_MAX_NUM);
             return -1;
         }
         ep->ep_num = ep_class->in_ep_num_base + ep_num;
@@ -1051,7 +1052,8 @@ static void setup_get_status(unsigned int dev_idx, const usb_setup_data_t *setup
             if (LUSBD_OUT_EP_MAX_NUM < ep_num)
             {
                 lusbd_ep_set_halt(dev_idx, 0, 0);
-                LUSBD_INFO("Dev(%u) setup get_status endpoint invalid, dir(0) num(%u) exceeds the max(%u), ep0 halted", dev_idx, ep_num, LUSBD_OUT_EP_MAX_NUM);
+                LUSBD_INFO("Dev(%u) setup get_status endpoint invalid, dir(0) num(%u) exceeds the max(%u), ep0 halted",
+                           dev_idx, ep_num, LUSBD_OUT_EP_MAX_NUM);
                 return;
             }
         }
@@ -1183,7 +1185,8 @@ static void setup_set_feature(unsigned int dev_idx, const usb_setup_data_t *setu
         if (0 != setup_data->wIndex_l)
         {
             lusbd_ep_set_halt(dev_idx, 0, 0);
-            LUSBD_INFO("Dev(%u) setup set_feature test_mode invalid, wIndex:0x%02x%02x, ep0 halted", dev_idx, setup_data->wIndex_h, setup_data->wIndex_l);
+            LUSBD_INFO("Dev(%u) setup set_feature test_mode invalid, wIndex:0x%02x%02x, ep0 halted",
+                       dev_idx, setup_data->wIndex_h, setup_data->wIndex_l);
             return;
         }
         dev->test_mode = setup_data->wIndex_h;
@@ -1240,6 +1243,13 @@ static void setup_set_address(unsigned int dev_idx, const usb_setup_data_t *setu
 static void get_device_desc(unsigned int dev_idx, const usb_setup_data_t *setup_data)
 {
     unsigned int data_len;
+
+    if (setup_data->wValue_l)
+    {
+        lusbd_ep_set_halt(dev_idx, 0, 0);
+        LUSBD_INFO("Dev(%u) setup get_device_descriptor invalid, wValue:0x%02x%02x, ep0 halted", dev_idx, setup_data->wValue_h, setup_data->wValue_l);
+        return;
+    }
 
     data_len = (setup_data->wLength_h << 8) | setup_data->wLength_l;
 
@@ -1453,10 +1463,19 @@ static void setup_set_config(unsigned int dev_idx, const usb_setup_data_t *setup
 {
     unsigned int cfg_val;
 
-    if (0 != setup_data->bmRequestType)
+    if (   (0 != setup_data->bmRequestType)
+        || (0 != setup_data->wValue_h)
+        || (0 != setup_data->wIndex_l)
+        || (0 != setup_data->wIndex_h)
+        || (0 != setup_data->wLength_l)
+        || (0 != setup_data->wLength_h))
     {
         lusbd_ep_set_halt(dev_idx, 0, 0);
-        LUSBD_INFO("Dev(%u) setup set_config invalid, bmRequestType:0x%02x, ep0 halted", dev_idx, setup_data->bmRequestType);
+        LUSBD_INFO("Dev(%u) setup set_config invalid, bmRequestType:0x%02x wValue:0x%02x%02x wIndex:0x%02x%02x wLength:0x%02x%02x, ep0 halted",
+                   dev_idx, setup_data->bmRequestType,
+                   setup_data->wValue_h, setup_data->wValue_l,
+                   setup_data->wIndex_h, setup_data->wIndex_l,
+                   setup_data->wLength_h, setup_data->wLength_l);
         return;
     }
 
@@ -1507,7 +1526,8 @@ static void setup_get_interface(unsigned int dev_idx, const usb_setup_data_t *se
     if (LUSBD_IF_LIST_LEN <= setup_data->wIndex_l)
     {
         lusbd_ep_set_halt(dev_idx, 0, 0);
-        LUSBD_INFO("Dev(%u) setup get_interface invalid, if_num(%u) exceeds the max(%u), ep0 halted", dev_idx, setup_data->wIndex_l, LUSBD_IF_LIST_LEN);
+        LUSBD_INFO("Dev(%u) setup get_interface invalid, if_num(%u) exceeds the max(%u), ep0 halted",
+                   dev_idx, setup_data->wIndex_l, LUSBD_IF_LIST_LEN);
         return;
     }
     active_if = &dev->active_ifs[setup_data->wIndex_l];
