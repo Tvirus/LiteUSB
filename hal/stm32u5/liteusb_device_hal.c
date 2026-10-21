@@ -222,7 +222,7 @@ int lusbd_hal_init_eps(unsigned int dev_idx, const lusbd_ep_t *out_ep_list, unsi
     for (i = 1; i < in_ep_count; i++)
     {
         ep = &in_ep_list[i];
-        if ((0 == ep->used) || (ep->alt_num))
+        if (0 == ep->active)
             continue;
         if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, i | 0x80, ep->max_packet_size, ep->type))
         {
@@ -284,7 +284,7 @@ void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
 {
     uint32_t USBx_BASE = (uint32_t)hpcd->Instance;
 
-    /* Cancel any pending EP0 IN transfer */
+    /* Abort any pending EP0 IN transfer */
     USBx_DEVICE->DIEPEMPMSK &= ~1U;
     HAL_PCD_EP_Abort(hpcd, 0x80);
     CLEAR_IN_EP_INTR(0, USB_OTG_DIEPINT_EPDISD | USB_OTG_DIEPINT_XFRC);

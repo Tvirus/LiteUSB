@@ -629,6 +629,8 @@ static int lusbd_activate_cfg(unsigned int dev_idx, unsigned int cfg_val)
                 *to_ep = *from_ep;
             to_ep->max_alt_mps = max_alt_mps;
         }
+        if (0 == to_ep->alt_num)
+            to_ep->active = 1;
 
         if (LUSBD_DIR_IN == from_ep->dir)
         {
@@ -646,11 +648,13 @@ static int lusbd_activate_cfg(unsigned int dev_idx, unsigned int cfg_val)
     dev->active_eps[0][0].type = LUSBD_EP_TYPE_CONTROL;
     dev->active_eps[0][0].max_packet_size = LUSBD_MAX_PACKET_SIZE_EP0;
     dev->active_eps[0][0].max_alt_mps = LUSBD_MAX_PACKET_SIZE_EP0;
+    dev->active_eps[0][0].active = 1;
     dev->active_eps[1][0].used = 1;
     dev->active_eps[1][0].dir = LUSBD_DIR_IN;
     dev->active_eps[1][0].type = LUSBD_EP_TYPE_CONTROL;
     dev->active_eps[1][0].max_packet_size = LUSBD_MAX_PACKET_SIZE_EP0;
     dev->active_eps[1][0].max_alt_mps = LUSBD_MAX_PACKET_SIZE_EP0;
+    dev->active_eps[1][0].active = 1;
     if (lusbd_hal_init_eps(dev_idx, dev->active_eps[0], max_out_ep_num + 1, dev->active_eps[1], max_in_ep_num + 1))
     {
         memset(&dev->active_ifs, 0, sizeof(dev->active_ifs));
