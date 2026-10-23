@@ -60,17 +60,12 @@ typedef struct
     uint8_t cur_cfg_idx;
     lusbd_user_cb_t user_cb;
 
-    const uint8_t *ep0_tx_buf;
-    unsigned int ep0_tx_len;
     lusbd_control_out_cb_t control_out_cb;
     void *control_out_arg;
     void *control_out_class_data;
-    uint8_t need_zlp;
-    uint8_t is_rx_status;
     uint8_t self_powered;
     uint8_t remote_wakeup;
     uint8_t test_mode;
-    uint8_t test_mode_state;
 
     lusbd_if_t active_ifs[LUSBD_IF_LIST_LEN];
 #if LUSBD_IN_EP_MAX_NUM <= LUSBD_OUT_EP_MAX_NUM
@@ -724,7 +719,7 @@ int lusbd_stop_device(unsigned int dev_idx)
     return 0;
 }
 
-int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     lusbd_dev_t *dev;
 
@@ -732,44 +727,42 @@ int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
         return -1;
     if (dir)
     {
-        if (LUSBD_IN_EP_MAX_NUM < num)
+        if (LUSBD_IN_EP_MAX_NUM < ep_num)
             return -1;
     }
     else
     {
-        if (LUSBD_OUT_EP_MAX_NUM < num)
+        if (LUSBD_OUT_EP_MAX_NUM < ep_num)
             return -1;
     }
     dev = &lusbd_dev_list[dev_idx];
 
-    if (0 == num)
+    if (0 == ep_num)
     {
         lusbd_hal_ep_set_halt(dev_idx, 0, 0);
         lusbd_hal_ep_set_halt(dev_idx, 1, 0);
-        dev->ep0_tx_buf = NULL;
-        dev->ep0_tx_len = 0;
         dev->control_out_cb = NULL;
-        dev->is_rx_status = 0;
+        dev->active_eps[1][0].need_zlp = 0;
     }
     else
     {
         dir = !!dir;
-        if (0 == dev->active_eps[dir][num].used)
+        if (0 == dev->active_eps[dir][ep_num].used)
         {
-            LUSBD_ERROR("Failed to halt endpoint, dev(%u) dir(%u) num(%u) invalid", dev_idx, dir, num);
+            LUSBD_ERROR("Failed to halt endpoint, dev(%u) dir(%u) num(%u) invalid", dev_idx, dir, ep_num);
             return -1;
         }
-        if (lusbd_hal_ep_set_halt(dev_idx, dir, num))
+        if (lusbd_hal_ep_set_halt(dev_idx, dir, ep_num))
         {
-            LUSBD_ERROR("Halt endpoint failed, dev:%u dir:%u num:%u", dev_idx, dir, num);
+            LUSBD_ERROR("Halt endpoint failed, dev:%u dir:%u num:%u", dev_idx, dir, ep_num);
             return -1;
         }
-        dev->active_eps[dir][num].halt = 1;
+        dev->active_eps[dir][ep_num].halt = 1;
     }
     return 0;
 }
 
-int lusbd_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     lusbd_dev_t *dev;
 
@@ -777,118 +770,72 @@ int lusbd_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int num
         return -1;
     if (dir)
     {
-        if (LUSBD_IN_EP_MAX_NUM < num)
+        if (LUSBD_IN_EP_MAX_NUM < ep_num)
             return -1;
     }
     else
     {
-        if (LUSBD_OUT_EP_MAX_NUM < num)
+        if (LUSBD_OUT_EP_MAX_NUM < ep_num)
             return -1;
     }
     dev = &lusbd_dev_list[dev_idx];
 
-    if (0 == num)
+    if (0 == ep_num)
     {
         return -1;
     }
     else
     {
         dir = !!dir;
-        if (0 == dev->active_eps[dir][num].used)
+        if (0 == dev->active_eps[dir][ep_num].used)
         {
-            LUSBD_ERROR("Failed to clear endpoint halt, dev(%u) dir(%u) num(%u) invalid", dev_idx, dir, num);
+            LUSBD_ERROR("Failed to clear endpoint halt, dev(%u) dir(%u) num(%u) invalid", dev_idx, dir, ep_num);
             return -1;
         }
-        if (lusbd_hal_ep_clear_halt(dev_idx, dir, num))
+        if (lusbd_hal_ep_clear_halt(dev_idx, dir, ep_num))
         {
-            LUSBD_ERROR("Clear endpoint halt failed, dev:%u dir:%u num:%u", dev_idx, dir, num);
+            LUSBD_ERROR("Clear endpoint halt failed, dev:%u dir:%u num:%u", dev_idx, dir, ep_num);
             return -1;
         }
-        dev->active_eps[dir][num].halt = 0;
+        dev->active_eps[dir][ep_num].halt = 0;
     }
     return 0;
 }
 
-int lusbd_ep_tx(unsigned int dev_idx, unsigned int num, const void *buf, unsigned int len, unsigned int need_zlp)
+int lusbd_ep_send(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len, unsigned int need_zlp)
 {
     lusbd_dev_t *dev;
     lusbd_ep_t *ep;
 
-    if ((LUSBD_DEV_COUNT <= dev_idx) || ((NULL == buf) && len) || (((uintptr_t)buf) & 0x03))
+    if ((LUSBD_DEV_COUNT <= dev_idx) || (LUSBD_IN_EP_MAX_NUM < ep_num) || ((NULL == buf) && len) || (((uintptr_t)buf) & 0x03))
         return -1;
     dev = &lusbd_dev_list[dev_idx];
+    ep = &dev->active_eps[1][ep_num];
+    if (ep_num && (0 == ep->active))
+        return -1;
 
-    if (num)
-    {
-        if (LUSBD_IN_EP_MAX_NUM < num)
-            return -1;
-        ep = &dev->active_eps[1][num];
-        if (0 == ep->used)
-            return -1;
-
-        if ((0 == len) || (len % ep->max_packet_size))
-            ep->need_zlp = 0;
-        else
-            ep->need_zlp = need_zlp;
-        return lusbd_hal_ep_tx(dev_idx, num, buf, len);
-    }
+    if ((len % ep->max_packet_size) || (0 == len))
+        ep->need_zlp = 0;
     else
-    {
-        if (LUSBD_MAX_PACKET_SIZE_EP0 <= len)
-        {
-            dev->need_zlp = need_zlp;
-            dev->ep0_tx_len = len;
-            dev->ep0_tx_buf = buf;
-            return lusbd_hal_ep_tx(dev_idx, 0, buf, LUSBD_MAX_PACKET_SIZE_EP0);
-        }
-        else if (len)
-        {
-            dev->need_zlp = 0;
-            dev->ep0_tx_len = 0;
-            dev->ep0_tx_buf = NULL;
-            return lusbd_hal_ep_tx(dev_idx, 0, buf, len);
-        }
-        else
-        {
-            dev->ep0_tx_buf = NULL;
-            dev->ep0_tx_len = 0;
-            dev->need_zlp = 0;
-            return lusbd_hal_ep_tx(dev_idx, 0, NULL, 0);
-        }
-    }
+        ep->need_zlp = need_zlp;
+    return lusbd_hal_ep_send(dev_idx, ep_num, buf, len);
 }
 
-int lusbd_ep_rx(unsigned int dev_idx, unsigned int num, void *buf, unsigned int len)
-{
-    if ((LUSBD_DEV_COUNT <= dev_idx) || ((NULL == buf) && len) || (((uintptr_t)buf) & 0x03))
-        return -1;
-    return lusbd_hal_ep_rx(dev_idx, num, buf, len);
-}
-
-int lusbd_control_tx_status(unsigned int dev_idx)
-{
-    lusbd_dev_t *dev;
-
-    if (LUSBD_DEV_COUNT <= dev_idx)
-        return -1;
-    dev = &lusbd_dev_list[dev_idx];
-
-    dev->ep0_tx_buf = NULL;
-    dev->ep0_tx_len = 0;
-    dev->need_zlp = 0;
-    dev->control_out_cb = NULL;
-    return lusbd_hal_ep_tx(dev_idx, 0, NULL, 0);
-}
-
-int lusbd_control_rx_status(unsigned int dev_idx)
+int lusbd_ep0_tx_status(unsigned int dev_idx)
 {
     if (LUSBD_DEV_COUNT <= dev_idx)
         return -1;
-    lusbd_dev_list[dev_idx].is_rx_status = 1;
-    return lusbd_hal_ep_rx(dev_idx, 0, NULL, 0);
+    return lusbd_hal_ep0_tx_status(dev_idx);
 }
 
-int lusbd_control_rx(unsigned int dev_idx, void *buf, unsigned int len, lusbd_control_out_cb_t cb, void *arg, void *class_data)
+int lusbd_ep_recv(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
+{
+    if ((LUSBD_DEV_COUNT <= dev_idx) || (0 == ep_num) || (LUSBD_OUT_EP_MAX_NUM < ep_num) || (NULL == buf) || (((uintptr_t)buf) & 0x03) || (0 == len))
+        return -1;
+    return lusbd_hal_ep_recv(dev_idx, ep_num, buf, len);
+}
+
+int lusbd_control_recv(unsigned int dev_idx, void *buf, unsigned int len, lusbd_control_out_cb_t cb, void *arg, void *class_data)
 {
     lusbd_dev_t *dev;
 
@@ -896,11 +843,10 @@ int lusbd_control_rx(unsigned int dev_idx, void *buf, unsigned int len, lusbd_co
         return -1;
     dev = &lusbd_dev_list[dev_idx];
 
-    dev->is_rx_status = 0;
     dev->control_out_class_data = class_data;
     dev->control_out_arg = arg;
     dev->control_out_cb = cb;
-    return lusbd_hal_ep_rx(dev_idx, 0, buf, len);
+    return lusbd_hal_ep_recv(dev_idx, 0, buf, len);
 }
 
 
@@ -963,12 +909,9 @@ void lusbd_reset_handler(unsigned int dev_idx, unsigned int speed)
     dev->enum_speed = speed;
     dev->cur_cfg_val = 0;
     dev->cur_cfg_idx = 0;
-    dev->ep0_tx_buf = NULL;
-    dev->ep0_tx_len = 0;
-    dev->need_zlp = 0;
     dev->control_out_cb = NULL;
-    dev->is_rx_status = 0;
     dev->remote_wakeup = 0;
+    dev->active_eps[1][0].need_zlp = 0;
     lusbd_update_dev_desc(dev_idx);
 
     lusbd_activate_cfg(dev_idx, 0);
@@ -1012,8 +955,7 @@ static void setup_get_status(unsigned int dev_idx, const usb_setup_data_t *setup
         memset(&dev->tx_buf.device_status, 0, sizeof(dev->tx_buf.device_status));
         dev->tx_buf.device_status.RemoteWakeup = dev->remote_wakeup;
         dev->tx_buf.device_status.SelfPowered = dev->self_powered;
-        lusbd_ep_tx(dev_idx, 0, &dev->tx_buf.device_status, sizeof(dev->tx_buf.device_status), 0);
-        lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, &dev->tx_buf.device_status, sizeof(dev->tx_buf.device_status), 0);
         LUSBD_DEBUG("Dev(%u) setup get_status device, remote_wakeup:%u self_powered:%u", dev_idx, dev->remote_wakeup, dev->self_powered);
     }
     else if (USB_REQ_RECIPIENT_INTERFACE == setup_data->bmRequestType_recipient)
@@ -1026,8 +968,7 @@ static void setup_get_status(unsigned int dev_idx, const usb_setup_data_t *setup
         }
         dev->tx_buf.interface_status[0] = 0;
         dev->tx_buf.interface_status[1] = 0;
-        lusbd_ep_tx(dev_idx, 0, dev->tx_buf.interface_status, sizeof(dev->tx_buf.interface_status), 0);
-        lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, dev->tx_buf.interface_status, sizeof(dev->tx_buf.interface_status), 0);
         LUSBD_DEBUG("Dev(%u) setup get_status interface", dev_idx);
     }
     else if (USB_REQ_RECIPIENT_ENDPOINT == setup_data->bmRequestType_recipient)
@@ -1070,8 +1011,7 @@ static void setup_get_status(unsigned int dev_idx, const usb_setup_data_t *setup
         }
         memset(&dev->tx_buf.endpoint_status, 0, sizeof(dev->tx_buf.endpoint_status));
         dev->tx_buf.endpoint_status.Halt = ep->halt;
-        lusbd_ep_tx(dev_idx, 0, &dev->tx_buf.endpoint_status, sizeof(dev->tx_buf.endpoint_status), 0);
-        lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, &dev->tx_buf.endpoint_status, sizeof(dev->tx_buf.endpoint_status), 0);
         LUSBD_DEBUG("Dev(%u) setup get_status endpoint, dir:%u num:%u halt:%u", dev_idx, dir, ep_num, ep->halt);
     }
 }
@@ -1114,12 +1054,12 @@ static void setup_clear_feature(unsigned int dev_idx, const usb_setup_data_t *se
             LUSBD_INFO("Dev(%u) setup set_feature endpoint_halt failed, dir:%u num:%u, ep0 halted", dev_idx, dir, ep_num);
             return;
         }
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_tx_status(dev_idx);
         LUSBD_INFO("Dev(%u) setup clear_feature endpoint_halt, dir:%u num:%u", dev_idx, dir, ep_num);
     }
     else if ((USB_REQ_FEATURE_DEVICE_REMOTE_WAKEUP == feature) && (USB_REQ_RECIPIENT_DEVICE == setup_data->bmRequestType_recipient))
     {
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_tx_status(dev_idx);
         dev->remote_wakeup = 0;
         LUSBD_INFO("Dev(%u) setup clear_feature remote_wakeup", dev_idx);
     }
@@ -1175,12 +1115,12 @@ static void setup_set_feature(unsigned int dev_idx, const usb_setup_data_t *setu
             LUSBD_INFO("Dev(%u) setup set_feature endpoint_halt failed, dir:%u num:%u, ep0 halted", dev_idx, dir, ep_num);
             return;
         }
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_tx_status(dev_idx);
         LUSBD_INFO("Dev(%u) setup set_feature endpoint_halt, dir:%u num:%u", dev_idx, dir, ep_num);
     }
     else if ((USB_REQ_FEATURE_DEVICE_REMOTE_WAKEUP == feature) && (USB_REQ_RECIPIENT_DEVICE == setup_data->bmRequestType_recipient))
     {
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_tx_status(dev_idx);
         dev->remote_wakeup = 1;
         LUSBD_INFO("Dev(%u) setup set_feature remote_wakeup", dev_idx);
     }
@@ -1194,8 +1134,8 @@ static void setup_set_feature(unsigned int dev_idx, const usb_setup_data_t *setu
             return;
         }
         dev->test_mode = setup_data->wIndex_h;
-        dev->test_mode_state = 1;
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_tx_status(dev_idx);
+        lusbd_hal_set_test_mode(dev_idx, dev->test_mode);
         LUSBD_INFO("Dev(%u) setup set_feature test_mode %u", dev_idx, dev->test_mode);
     }
     else
@@ -1231,7 +1171,7 @@ static void setup_set_address(unsigned int dev_idx, const usb_setup_data_t *setu
     }
 
     lusbd_hal_set_address(dev_idx, addr);
-    lusbd_control_tx_status(dev_idx);
+    lusbd_ep0_tx_status(dev_idx);
     if (0 == addr)
     {
         lusbd_dev_list[dev_idx].dev_state = USB_STATE_DEFAULT;
@@ -1258,10 +1198,9 @@ static void get_device_desc(unsigned int dev_idx, const usb_setup_data_t *setup_
     data_len = (setup_data->wLength_h << 8) | setup_data->wLength_l;
 
     if (sizeof(lusbd_dev_list[dev_idx].dev_desc) < data_len)
-        lusbd_ep_tx(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_desc, sizeof(lusbd_dev_list[dev_idx].dev_desc), 1);
+        lusbd_ep_send(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_desc, sizeof(lusbd_dev_list[dev_idx].dev_desc), 1);
     else
-        lusbd_ep_tx(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_desc, data_len, 0);
-    lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_desc, data_len, 0);
     LUSBD_DEBUG("Dev(%u) setup get_device_descriptor, len:%u", dev_idx, data_len);
 }
 
@@ -1316,10 +1255,9 @@ static void get_config_desc(unsigned int dev_idx, const usb_setup_data_t *setup_
 #endif
     total_length = (cfg->cfg_desc.wTotalLength_h << 8) | cfg->cfg_desc.wTotalLength_l;
     if (total_length < data_len)
-        lusbd_ep_tx(dev_idx, 0, cfg->cfg_desc_buf, total_length, 1);
+        lusbd_ep_send(dev_idx, 0, cfg->cfg_desc_buf, total_length, 1);
     else
-        lusbd_ep_tx(dev_idx, 0, cfg->cfg_desc_buf, data_len, 0);
-    lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, cfg->cfg_desc_buf, data_len, 0);
 
     LUSBD_DEBUG("Dev(%u) setup get_config_descriptor, index:%u len:%u desc_len:%u", dev_idx, desc_idx, data_len, total_length);
 }
@@ -1353,10 +1291,9 @@ static void get_string_desc(unsigned int dev_idx, const usb_setup_data_t *setup_
         str_len = sizeof(lang_id_desc);
     }
     if (str_len < data_len)
-        lusbd_ep_tx(dev_idx, 0, buf, str_len, 1);
+        lusbd_ep_send(dev_idx, 0, buf, str_len, 1);
     else
-        lusbd_ep_tx(dev_idx, 0, buf, data_len, 0);
-    lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, buf, data_len, 0);
 
     LUSBD_DEBUG("Dev(%u) setup get_string_descriptor, lang:0x%x index:%u len:%u str_len:%u", dev_idx, lang_id, desc_idx, data_len, str_len);
 }
@@ -1372,10 +1309,9 @@ static void get_device_qualifier_desc(unsigned int dev_idx, const usb_setup_data
 
     data_len = (setup_data->wLength_h << 8) | setup_data->wLength_l;
     if (sizeof(lusbd_dev_list[dev_idx].dev_qualifier_desc) < data_len)
-        lusbd_ep_tx(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_qualifier_desc, sizeof(lusbd_dev_list[dev_idx].dev_qualifier_desc), 1);
+        lusbd_ep_send(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_qualifier_desc, sizeof(lusbd_dev_list[dev_idx].dev_qualifier_desc), 1);
     else
-        lusbd_ep_tx(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_qualifier_desc, data_len, 0);
-    lusbd_control_rx_status(dev_idx);
+        lusbd_ep_send(dev_idx, 0, &lusbd_dev_list[dev_idx].dev_qualifier_desc, data_len, 0);
     LUSBD_DEBUG("Dev(%u) setup get_device_qualifier_descriptor, len:%u", dev_idx, data_len);
 #endif
 }
@@ -1458,8 +1394,7 @@ static void setup_get_config(unsigned int dev_idx, const usb_setup_data_t *setup
     dev = &lusbd_dev_list[dev_idx];
 
     dev->tx_buf.cfg_val = dev->cur_cfg_val;
-    lusbd_ep_tx(dev_idx, 0, &dev->tx_buf.cfg_val, sizeof(dev->tx_buf.cfg_val), 0);
-    lusbd_control_rx_status(dev_idx);
+    lusbd_ep_send(dev_idx, 0, &dev->tx_buf.cfg_val, sizeof(dev->tx_buf.cfg_val), 0);
     LUSBD_DEBUG("Dev(%u) setup get_config %u", dev_idx, dev->cur_cfg_val);
 }
 
@@ -1492,7 +1427,7 @@ static void setup_set_config(unsigned int dev_idx, const usb_setup_data_t *setup
         return;
     }
 
-    lusbd_control_tx_status(dev_idx);
+    lusbd_ep0_tx_status(dev_idx);
     if (cfg_val)
         lusbd_dev_list[dev_idx].dev_state = USB_STATE_CONFIGURED;
     else
@@ -1544,8 +1479,7 @@ static void setup_get_interface(unsigned int dev_idx, const usb_setup_data_t *se
     }
 
     dev->tx_buf.alt_setting = active_if->cur_alt;
-    lusbd_ep_tx(dev_idx, 0, &dev->tx_buf.alt_setting, sizeof(dev->tx_buf.alt_setting), 0);
-    lusbd_control_rx_status(dev_idx);
+    lusbd_ep_send(dev_idx, 0, &dev->tx_buf.alt_setting, sizeof(dev->tx_buf.alt_setting), 0);
     LUSBD_DEBUG("Dev(%u) setup get_interface %u", dev_idx, active_if->cur_alt);
 }
 
@@ -1584,6 +1518,8 @@ void lusbd_setup_handler(unsigned int dev_idx, const uint8_t *setup_data)
 
     if ((LUSBD_DEV_COUNT <= dev_idx) || (NULL == setup_data))
         return;
+    lusbd_dev_list[dev_idx].control_out_cb = NULL;
+    lusbd_dev_list[dev_idx].active_eps[1][0].need_zlp = 0;
 
     //LUSBD_DEBUG("Dev(%u) setup, bmRequestType:%02x  req:%u value:0x%02x%02x idx:0x%02x%02x len:0x%02x%02x",
     //            dev_idx, data->bmRequestType, data->bRequest,
@@ -1723,64 +1659,23 @@ void lusbd_data_in_handler(unsigned int dev_idx, unsigned int ep_num)
     lusbd_ep_t *ep;
     lusbd_class_t *cls;
 
-    if (LUSBD_DEV_COUNT <= dev_idx)
+    if ((LUSBD_DEV_COUNT <= dev_idx) || (LUSBD_IN_EP_MAX_NUM < ep_num))
         return;
     dev = &lusbd_dev_list[dev_idx];
+    ep = &dev->active_eps[1][ep_num];
+
+    if (ep->need_zlp)
+    {
+        ep->need_zlp = 0;
+        lusbd_hal_ep_send(dev_idx, ep_num, NULL, 0);
+        return;
+    }
 
     if (ep_num)
     {
-        if (LUSBD_IN_EP_MAX_NUM < ep_num)
-            return;
-        ep = &dev->active_eps[1][ep_num];
-        if (ep->need_zlp)
-        {
-            ep->need_zlp = 0;
-            lusbd_hal_ep_tx(dev_idx, ep_num, NULL, 0);
-        }
-        else
-        {
-            cls = &lusbd_class_list[ep->class_idx];
-            if (cls->cb && cls->cb->data_in_complete)
-                cls->cb->data_in_complete(dev_idx, ep_num, cls->class_data);
-        }
-    }
-    else
-    {
-        if (1 == dev->test_mode_state)
-        {
-            dev->test_mode_state = 2;
-            lusbd_hal_set_test_mode(dev_idx, dev->test_mode);
-        }
-        if (NULL == dev->ep0_tx_buf)
-            return;
-        if ((LUSBD_MAX_PACKET_SIZE_EP0 * 2) <= dev->ep0_tx_len)
-        {
-            dev->ep0_tx_buf += LUSBD_MAX_PACKET_SIZE_EP0;
-            dev->ep0_tx_len -= LUSBD_MAX_PACKET_SIZE_EP0;
-            lusbd_hal_ep_tx(dev_idx, 0, dev->ep0_tx_buf, LUSBD_MAX_PACKET_SIZE_EP0);
-            lusbd_control_rx_status(dev_idx);
-        }
-        else if (LUSBD_MAX_PACKET_SIZE_EP0 < dev->ep0_tx_len)
-        {
-            dev->ep0_tx_buf += LUSBD_MAX_PACKET_SIZE_EP0;
-            dev->ep0_tx_len -= LUSBD_MAX_PACKET_SIZE_EP0;
-            lusbd_hal_ep_tx(dev_idx, 0, dev->ep0_tx_buf, dev->ep0_tx_len);
-            lusbd_control_rx_status(dev_idx);
-            dev->ep0_tx_buf = NULL;
-            dev->ep0_tx_len = 0;
-            dev->need_zlp = 0;
-        }
-        else if (LUSBD_MAX_PACKET_SIZE_EP0 == dev->ep0_tx_len)
-        {
-            dev->ep0_tx_buf = NULL;
-            dev->ep0_tx_len = 0;
-            if (dev->need_zlp)
-            {
-                dev->need_zlp = 0;
-                lusbd_hal_ep_tx(dev_idx, 0, NULL, 0);
-            }
-            lusbd_control_rx_status(dev_idx);
-        }
+        cls = &lusbd_class_list[ep->class_idx];
+        if (cls->cb && cls->cb->data_in_complete)
+            cls->cb->data_in_complete(dev_idx, ep_num, cls->class_data);
     }
 }
 
@@ -1805,11 +1700,6 @@ void lusbd_data_out_handler(unsigned int dev_idx, unsigned int ep_num, uint8_t *
     }
     else
     {
-        if (dev->is_rx_status)
-        {
-            dev->is_rx_status = 0;
-            return;
-        }
         if (dev->control_out_cb)
         {
             dev->control_out_cb(dev_idx, buf, recv_len, dev->control_out_arg, dev->control_out_class_data);

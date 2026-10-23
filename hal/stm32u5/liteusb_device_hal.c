@@ -15,6 +15,10 @@ static unsigned int ep0_rx_total_len = 0;
 static unsigned int ep0_rx_remaining_len = 0;
 static uint8_t *ep0_rx_addr = NULL;
 static uint8_t ep0_rx_buf[LUSBD_MAX_PACKET_SIZE_EP0] __attribute__((aligned(4)));
+static unsigned int ep0_tx_total_len = 0;
+static unsigned int ep0_tx_remaining_len = 0;
+static const uint8_t *ep0_tx_addr = NULL;
+static uint8_t dev_test_mode = 0;
 
 
 int lusbd_hal_start_device(unsigned int dev_idx)
@@ -34,78 +38,120 @@ int lusbd_hal_stop_device(unsigned int dev_idx)
     return 0;
 }
 
-int lusbd_hal_ep_open(unsigned int dev_idx, unsigned int dir, unsigned int num, unsigned int mps, unsigned int type)
+int lusbd_hal_ep_open(unsigned int dev_idx, unsigned int dir, unsigned int ep_num, unsigned int mps, unsigned int type)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, num, mps, type))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, ep_num, mps, type))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_SetStall(&hpcd_USB_OTG_FS, (uint8_t)num))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_SetStall(&hpcd_USB_OTG_FS, (uint8_t)ep_num))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_ClrStall(&hpcd_USB_OTG_FS, (uint8_t)num))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_ClrStall(&hpcd_USB_OTG_FS, (uint8_t)ep_num))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int num, const void *buf, unsigned int len)
-{
-    if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
-        return -1;
-    return 0;
-}
-
-int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int num, void *buf, unsigned int len)
+int lusbd_hal_ep_send(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len)
 {
     unsigned int mps;
 
-    if (num)
+    if (ep_num)
     {
-        mps = hpcd_USB_OTG_FS.OUT_ep[num].maxpacket;
-        if (0 == mps)
+        if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, ep_num, (uint8_t *)buf, len))
             return -1;
-        if (len % mps)
-        {
-            LUSBD_ERROR("STM32U5 out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", num, len, mps);
-            return -1;
-        }
-        if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
+        return 0;
+    }
+
+    mps = hpcd_USB_OTG_FS.IN_ep[0].maxpacket;
+    ep0_tx_addr = buf;
+    ep0_tx_remaining_len = len;
+    ep0_tx_total_len = len;
+    if (mps < len)
+    {
+        if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, 0, (uint8_t *)buf, mps))
             return -1;
     }
     else
     {
-        ep0_rx_total_len = len;
+        if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, 0, (uint8_t *)buf, len))
+            return -1;
+    }
+    lusbd_hal_ep0_rx_status(dev_idx);
+    return 0;
+}
+
+int lusbd_hal_ep0_tx_status(unsigned int dev_idx)
+{
+    ep0_tx_total_len = 0;
+    ep0_tx_remaining_len = 0;
+    ep0_tx_addr = NULL;
+    if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, 0, NULL, 0))
+        return -1;
+    return 0;
+}
+
+int lusbd_hal_ep_recv(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
+{
+    unsigned int mps;
+
+    mps = hpcd_USB_OTG_FS.OUT_ep[ep_num].maxpacket;
+    if (0 == mps)
+        return -1;
+    if (ep_num)
+    {
+        if (len % mps)
+        {
+            LUSBD_ERROR("STM32U5 out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", ep_num, len, mps);
+            return -1;
+        }
+        if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, ep_num, (uint8_t *)buf, len))
+            return -1;
+    }
+    else
+    {
+        ep0_rx_addr = buf;
         ep0_rx_remaining_len = len;
-        ep0_rx_addr = (uint8_t *)buf;
+        ep0_rx_total_len = len;
         if (0 == len)
         {
             if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, 0))
                 return -1;
         }
-        else if (LUSBD_MAX_PACKET_SIZE_EP0 > len)
+        else if (mps > len)
         {
-            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0))
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, mps))
                 return -1;
         }
         else
         {
-            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_addr, LUSBD_MAX_PACKET_SIZE_EP0))
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_addr, mps))
                 return -1;
         }
     }
+    return 0;
+}
+
+int lusbd_hal_ep0_rx_status(unsigned int dev_idx)
+{
+    ep0_rx_total_len = 0;
+    ep0_rx_remaining_len = 0;
+    ep0_rx_addr = NULL;
+    if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, 0))
+        return -1;
     return 0;
 }
 
@@ -244,7 +290,8 @@ int lusbd_hal_set_remote_wakeup(unsigned int dev_idx, unsigned int enable)
 
 int lusbd_hal_set_test_mode(unsigned int dev_idx, unsigned int test_mode)
 {
-    return HAL_PCD_SetTestMode(&hpcd_USB_OTG_FS, test_mode);
+    dev_test_mode = test_mode;
+    return 0;
 }
 
 
@@ -290,30 +337,79 @@ void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
     CLEAR_IN_EP_INTR(0, USB_OTG_DIEPINT_EPDISD | USB_OTG_DIEPINT_XFRC);
     HAL_PCD_EP_Flush(hpcd, 0x80);
 
+    ep0_rx_total_len = 0;
+    ep0_rx_remaining_len = 0;
+    ep0_rx_addr = NULL;
+    ep0_tx_total_len = 0;
+    ep0_tx_remaining_len = 0;
+    ep0_tx_addr = NULL;
+
     lusbd_setup_handler(0, (uint8_t *)hpcd->Setup);
 }
 
-void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
+void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, uint8_t ep_num)
 {
-    lusbd_data_in_handler(0, epnum);
-}
+    unsigned int mps;
 
-void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
-{
-    unsigned int recv_len;
-
-    recv_len = HAL_PCD_EP_GetRxCount(hpcd, epnum);
-
-    if (epnum)
+    if (ep_num)
     {
-        lusbd_data_out_handler(0, epnum, hpcd->OUT_ep[epnum].xfer_buff - recv_len, recv_len);
+        lusbd_data_in_handler(0, ep_num);
         return;
     }
 
-    if (LUSBD_MAX_PACKET_SIZE_EP0 < recv_len)
+    if (dev_test_mode)
+    {
+        HAL_PCD_SetTestMode(&hpcd_USB_OTG_FS, dev_test_mode);
+        dev_test_mode = 0;
+    }
+    if (0 == ep0_tx_total_len)
+        return;
+
+    mps = hpcd_USB_OTG_FS.IN_ep[0].maxpacket;
+    if (mps < ep0_tx_remaining_len)
+    {
+        ep0_tx_remaining_len -= mps;
+        if (mps < ep0_tx_remaining_len)
+        {
+            if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, 0, (uint8_t *)(ep0_tx_addr + ep0_tx_total_len - ep0_tx_remaining_len), mps))
+                return;
+        }
+        else
+        {
+            if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, 0, (uint8_t *)(ep0_tx_addr + ep0_tx_total_len - ep0_tx_remaining_len), ep0_tx_remaining_len))
+                return;
+        }
+        lusbd_hal_ep0_rx_status(0);
+    }
+    else
+    {
+        ep0_tx_total_len = 0;
+        ep0_tx_remaining_len = 0;
+        ep0_tx_addr = NULL;
+        lusbd_data_in_handler(0, 0);
+    }
+}
+
+void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t ep_num)
+{
+    unsigned int mps;
+    unsigned int recv_len;
+
+    recv_len = HAL_PCD_EP_GetRxCount(hpcd, ep_num);
+
+    if (ep_num)
+    {
+        lusbd_data_out_handler(0, ep_num, hpcd->OUT_ep[ep_num].xfer_buff - recv_len, recv_len);
+        return;
+    }
+
+    if (0 == ep0_rx_total_len)
+        return;
+    mps = hpcd_USB_OTG_FS.OUT_ep[0].maxpacket;
+    if (mps < recv_len)
     {
         lusbd_ep_set_halt(0, 0, 0);
-        LUSBD_ERROR("STM32U5 ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, LUSBD_MAX_PACKET_SIZE_EP0);
+        LUSBD_ERROR("STM32U5 ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, mps);
         return;
     }
     if (ep0_rx_remaining_len < recv_len)
@@ -323,25 +419,33 @@ void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
                     ep0_rx_total_len - ep0_rx_remaining_len + recv_len, ep0_rx_total_len);
         return;
     }
-    if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
+
+    if (mps > ep0_rx_remaining_len)
     {
-        if (ep0_rx_addr)
-            memcpy(ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, ep0_rx_buf, recv_len);
+        memcpy(ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, ep0_rx_buf, recv_len);
         lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
+        /* lusbd_data_out_handler() does not receive data again */
+        ep0_rx_total_len = 0;
+        ep0_rx_remaining_len = 0;
+        ep0_rx_addr = NULL;
     }
     else
     {
-        if ((LUSBD_MAX_PACKET_SIZE_EP0 > recv_len) || (LUSBD_MAX_PACKET_SIZE_EP0 == ep0_rx_remaining_len))
+        if ((mps > recv_len) || (mps == ep0_rx_remaining_len))
         {
             lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
+            /* lusbd_data_out_handler() does not receive data again */
+            ep0_rx_total_len = 0;
+            ep0_rx_remaining_len = 0;
+            ep0_rx_addr = NULL;
         }
         else
         {
-            ep0_rx_remaining_len -= LUSBD_MAX_PACKET_SIZE_EP0;
-            if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
-                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0);
+            ep0_rx_remaining_len -= mps;
+            if (mps > ep0_rx_remaining_len)
+                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_buf, mps);
             else
-                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, LUSBD_MAX_PACKET_SIZE_EP0);
+                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, mps);
         }
     }
 }
