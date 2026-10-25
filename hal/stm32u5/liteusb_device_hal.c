@@ -34,55 +34,55 @@ int lusbd_hal_stop_device(unsigned int dev_idx)
     return 0;
 }
 
-int lusbd_hal_ep_open(unsigned int dev_idx, unsigned int dir, unsigned int num, unsigned int mps, unsigned int type)
+int lusbd_hal_ep_open(unsigned int dev_idx, unsigned int dir, unsigned int ep_num, unsigned int mps, unsigned int type)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, num, mps, type))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_Open(&hpcd_USB_OTG_FS, ep_num, mps, type))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_SetStall(&hpcd_USB_OTG_FS, (uint8_t)num))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_SetStall(&hpcd_USB_OTG_FS, (uint8_t)ep_num))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int num)
+int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num)
 {
     if (LUSBD_DIR_IN == dir)
-        num |= 0x80;
-    if (HAL_PCD_EP_ClrStall(&hpcd_USB_OTG_FS, (uint8_t)num))
+        ep_num |= 0x80;
+    if (HAL_PCD_EP_ClrStall(&hpcd_USB_OTG_FS, (uint8_t)ep_num))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int num, const void *buf, unsigned int len)
+int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len)
 {
-    if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
+    if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, ep_num, (uint8_t *)buf, len))
         return -1;
     return 0;
 }
 
-int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int num, void *buf, unsigned int len)
+int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
 {
     unsigned int mps;
 
-    if (num)
+    if (ep_num)
     {
-        mps = hpcd_USB_OTG_FS.OUT_ep[num].maxpacket;
+        mps = hpcd_USB_OTG_FS.OUT_ep[ep_num].maxpacket;
         if (0 == mps)
             return -1;
         if (len % mps)
         {
-            LUSBD_ERROR("STM32U5 out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", num, len, mps);
+            LUSBD_ERROR("STM32U5 out ep(%u) rx buf size(%u) must be a multiple of MPS(%u)", ep_num, len, mps);
             return -1;
         }
-        if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, num, (uint8_t *)buf, len))
+        if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, ep_num, (uint8_t *)buf, len))
             return -1;
     }
     else

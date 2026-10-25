@@ -304,7 +304,7 @@ static void acm_control_out_cb(unsigned int dev_idx, uint8_t *buf, unsigned int 
         }
         cdcacmd->line_coding = *line_coding;
     }
-    lusbd_control_tx_status(dev_idx);
+    lusbd_ep0_send_status(dev_idx);
     return;
 }
 
@@ -383,7 +383,7 @@ static void acm_setup_cb(unsigned int dev_idx, const usb_setup_data_t *setup_dat
             LUSBD_INFO("CDC-ACM(%u) recv SET_LINE_CODING invalid, data_len:%u, ep0 halted", (unsigned int)class_data, data_len);
             goto HALT;
         }
-        lusbd_control_rx(dev_idx, &cdcacmd->rx_buf.line_coding, data_len, acm_control_out_cb, (void *)COMM_IF_REQ_SET_LINE_CODING, class_data);
+        lusbd_ep0_recv(dev_idx, &cdcacmd->rx_buf.line_coding, data_len, acm_control_out_cb, (void *)COMM_IF_REQ_SET_LINE_CODING, class_data);
         LUSBD_DEBUG("CDC-ACM(%u) recv SET_LINE_CODING", (unsigned int)class_data);
     }
     else if (COMM_IF_REQ_GET_LINE_CODING == setup_data->bRequest)
@@ -405,17 +405,17 @@ static void acm_setup_cb(unsigned int dev_idx, const usb_setup_data_t *setup_dat
         }
 
         if (sizeof(cdcacmd->line_coding) < data_len)
-            lusbd_ep_tx(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, sizeof(cdcacmd->line_coding), 1);
+            lusbd_ep_send(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, sizeof(cdcacmd->line_coding), 1);
         else
-            lusbd_ep_tx(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, data_len, 0);
-        lusbd_control_rx_status(dev_idx);
+            lusbd_ep_send(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, data_len, 0);
+        lusbd_ep0_recv_status(dev_idx);
         LUSBD_DEBUG("CDC-ACM(%u) recv GET_LINE_CODING", (unsigned int)class_data);
     }
     else if (COMM_IF_REQ_SET_CONTROL_LINE_STATE == setup_data->bRequest)
     {
         if (0x21 != setup_data->bmRequestType)
             goto HALT;
-        lusbd_control_tx_status(dev_idx);
+        lusbd_ep0_send_status(dev_idx);
         LUSBD_DEBUG("CDC-ACM(%u) recv SET_CONTROL_LINE_STATE, value:0x%02x%02x", (unsigned int)class_data, setup_data->wValue_h, setup_data->wValue_l);
     }
     else if (COMM_IF_REQ_SEND_BREAK == setup_data->bRequest)
@@ -695,7 +695,7 @@ int cdcacmd_recv(unsigned int cdc_idx, uint8_t *buf, unsigned int len)
     cdcacmd = &cdcacmd_list[cdc_idx];
     if (0 == cdcacmd->active)
         return -1;
-    return lusbd_ep_rx(cdcacmd->dev_idx, cdcacmd->cur_out_ep_num_base + CDCACM_DATA_OUT_EP_NUM, buf, len);
+    return lusbd_ep_recv(cdcacmd->dev_idx, cdcacmd->cur_out_ep_num_base + CDCACM_DATA_OUT_EP_NUM, buf, len);
 }
 
 int cdcacmd_send(unsigned int cdc_idx, const void *buf, unsigned int len)
@@ -708,5 +708,5 @@ int cdcacmd_send(unsigned int cdc_idx, const void *buf, unsigned int len)
     cdcacmd = &cdcacmd_list[cdc_idx];
     if (0 == cdcacmd->active)
         return -1;
-    return lusbd_ep_tx(cdcacmd->dev_idx, cdcacmd->cur_in_ep_num_base + CDCACM_DATA_IN_EP_NUM, buf, len, 1);
+    return lusbd_ep_send(cdcacmd->dev_idx, cdcacmd->cur_in_ep_num_base + CDCACM_DATA_IN_EP_NUM, buf, len, 1);
 }
