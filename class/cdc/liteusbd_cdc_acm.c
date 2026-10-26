@@ -1,5 +1,5 @@
 #include "liteusbd_cdc_acm.h"
-#include "cdc_def.h"
+#include "usb_cdc_def.h"
 #include <string.h>
 
 
@@ -277,7 +277,7 @@ static void acm_control_out_cb(unsigned int dev_idx, uint8_t *buf, unsigned int 
         if (sizeof(cdcacm_line_coding_t) != len)
         {
             lusbd_ep_set_halt(dev_idx, 0, 0);
-            LUSBD_INFO("CDC-ACM(%u) recv SET_LINE_CODING data invalid, data_len(%u), ep0 halted", (unsigned int)class_data, len);
+            LUSBD_INFO("CDC-ACM(%u) recv SET_LINE_CODING data invalid, data_len:%u, ep0 halted", (unsigned int)class_data, len);
             return;
         }
         rate =  ((unsigned int)line_coding->dwDTERate_3 << 24)

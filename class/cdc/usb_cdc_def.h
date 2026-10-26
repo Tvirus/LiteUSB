@@ -1,5 +1,5 @@
-#ifndef _CDC_DEF_H_
-#define _CDC_DEF_H_
+#ifndef _USB_CDC_DEF_H_
+#define _USB_CDC_DEF_H_
 
 #include <stdint.h>
 
