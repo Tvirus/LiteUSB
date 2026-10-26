@@ -58,19 +58,21 @@ typedef struct
     uint8_t enum_speed;
     uint8_t cur_cfg_val;
     uint8_t cur_cfg_idx;
-    lusbd_user_cb_t user_cb;
-
-    const uint8_t *ep0_tx_buf;
-    unsigned int ep0_tx_len;
-    lusbd_control_out_cb_t control_out_cb;
-    void *control_out_arg;
-    void *control_out_class_data;
-    uint8_t need_zlp;
-    uint8_t is_rx_status;
     uint8_t self_powered;
     uint8_t remote_wakeup;
     uint8_t test_mode;
     uint8_t test_mode_state;
+    lusbd_user_cb_t user_cb;
+
+    const uint8_t *ep0_tx_buf;
+    unsigned int ep0_tx_len;
+    uint8_t *ep0_rx_buf;
+    unsigned int ep0_rx_total_len;
+    unsigned int ep0_rx_remaining_len;
+    lusbd_control_out_cb_t control_out_cb;
+    void *control_out_arg;
+    void *control_out_class_data;
+    uint8_t need_zlp;
 
     lusbd_if_t active_ifs[LUSBD_IF_LIST_LEN];
 #if LUSBD_IN_EP_MAX_NUM <= LUSBD_OUT_EP_MAX_NUM
@@ -744,7 +746,9 @@ int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_nu
         dev->ep0_tx_len = 0;
         dev->ep0_tx_buf = NULL;
         dev->control_out_cb = NULL;
-        dev->is_rx_status = 0;
+        dev->ep0_rx_total_len = 0;
+        dev->ep0_rx_remaining_len = 0;
+        dev->ep0_rx_buf = NULL;
     }
     else
     {
@@ -862,7 +866,6 @@ int lusbd_ep0_send_status(unsigned int dev_idx)
     dev->need_zlp = 0;
     dev->ep0_tx_len = 0;
     dev->ep0_tx_buf = NULL;
-    dev->control_out_cb = NULL;
     return lusbd_hal_ep_tx(dev_idx, 0, NULL, 0);
 }
 
@@ -881,18 +884,30 @@ int lusbd_ep0_recv(unsigned int dev_idx, void *buf, unsigned int len, lusbd_cont
         return -1;
     dev = &lusbd_dev_list[dev_idx];
 
-    dev->is_rx_status = 0;
+    dev->ep0_rx_buf = buf;
+    dev->ep0_rx_total_len = len;
+    dev->ep0_rx_remaining_len = len;
     dev->control_out_class_data = class_data;
     dev->control_out_arg = arg;
     dev->control_out_cb = cb;
-    return lusbd_hal_ep_rx(dev_idx, 0, buf, len);
+    if (LUSBD_MAX_PACKET_SIZE_EP0 >= len)
+        return lusbd_hal_ep_rx(dev_idx, 0, buf, len);
+    else
+        return lusbd_hal_ep_rx(dev_idx, 0, buf, LUSBD_MAX_PACKET_SIZE_EP0);
 }
 
 int lusbd_ep0_recv_status(unsigned int dev_idx)
 {
+    lusbd_dev_t *dev;
+
     if (LUSBD_DEV_COUNT <= dev_idx)
         return -1;
-    lusbd_dev_list[dev_idx].is_rx_status = 1;
+    dev = &lusbd_dev_list[dev_idx];
+
+    dev->control_out_cb = NULL;
+    dev->ep0_rx_total_len = 0;
+    dev->ep0_rx_remaining_len = 0;
+    dev->ep0_rx_buf = NULL;
     return lusbd_hal_ep_rx(dev_idx, 0, NULL, 0);
 }
 
@@ -960,7 +975,9 @@ void lusbd_reset_handler(unsigned int dev_idx, unsigned int speed)
     dev->ep0_tx_len = 0;
     dev->ep0_tx_buf = NULL;
     dev->control_out_cb = NULL;
-    dev->is_rx_status = 0;
+    dev->ep0_rx_total_len = 0;
+    dev->ep0_rx_remaining_len = 0;
+    dev->ep0_rx_buf = NULL;
     dev->remote_wakeup = 0;
     lusbd_update_dev_desc(dev_idx);
 
@@ -1575,6 +1592,9 @@ void lusbd_setup_handler(unsigned int dev_idx, const uint8_t *setup_data)
     dev->ep0_tx_len = 0;
     dev->ep0_tx_buf = NULL;
     dev->control_out_cb = NULL;
+    dev->ep0_rx_total_len = 0;
+    dev->ep0_rx_remaining_len = 0;
+    dev->ep0_rx_buf = NULL;
 
     //LUSBD_DEBUG("Dev(%u) setup, bmRequestType:%02x  req:%u value:0x%02x%02x idx:0x%02x%02x len:0x%02x%02x",
     //            dev_idx, data->bmRequestType, data->bRequest,
@@ -1794,22 +1814,44 @@ void lusbd_data_out_handler(unsigned int dev_idx, unsigned int ep_num, uint8_t *
         cls = &lusbd_class_list[ep->class_idx];
         if (cls->cb && cls->cb->data_out)
             cls->cb->data_out(dev_idx, ep_num, buf, recv_len, cls->class_data);
+        return;
+    }
+
+    if (NULL == buf)
+        return;
+    if (LUSBD_MAX_PACKET_SIZE_EP0 < recv_len)
+    {
+        lusbd_ep_set_halt(0, 0, 0);
+        LUSBD_ERROR("ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, LUSBD_MAX_PACKET_SIZE_EP0);
+        return;
+    }
+    if (dev->ep0_rx_remaining_len < recv_len)
+    {
+        lusbd_ep_set_halt(0, 0, 0);
+        LUSBD_ERROR("ep0 recv len(%u) exceeds expected len(%u), ep0 halted",
+                    dev->ep0_rx_total_len - dev->ep0_rx_remaining_len + recv_len, dev->ep0_rx_total_len);
+        return;
+    }
+
+    if ((LUSBD_MAX_PACKET_SIZE_EP0 > recv_len) || (dev->ep0_rx_remaining_len == recv_len))
+    {
+        if (dev->control_out_cb)
+        {
+            dev->control_out_cb(dev_idx, dev->ep0_rx_buf, dev->ep0_rx_total_len - dev->ep0_rx_remaining_len + recv_len,
+                                dev->control_out_arg, dev->control_out_class_data);
+            dev->control_out_cb = NULL;
+        }
+        /* control_out_cb() does not receive data again */
+        dev->ep0_rx_total_len = 0;
+        dev->ep0_rx_remaining_len = 0;
+        dev->ep0_rx_buf = NULL;
     }
     else
     {
-        if (dev->is_rx_status)
-        {
-            dev->is_rx_status = 0;
-            return;
-        }
-        if (dev->control_out_cb)
-        {
-            dev->control_out_cb(dev_idx, buf, recv_len, dev->control_out_arg, dev->control_out_class_data);
-            dev->control_out_cb = NULL;
-        }
+        dev->ep0_rx_remaining_len -= LUSBD_MAX_PACKET_SIZE_EP0;
+        if (LUSBD_MAX_PACKET_SIZE_EP0 < dev->ep0_rx_remaining_len)
+            lusbd_hal_ep_rx(dev_idx, 0, dev->ep0_rx_buf + dev->ep0_rx_total_len - dev->ep0_rx_remaining_len, LUSBD_MAX_PACKET_SIZE_EP0);
         else
-        {
-            lusbd_ep_set_halt(dev_idx, 0, 0);
-        }
+            lusbd_hal_ep_rx(dev_idx, 0, dev->ep0_rx_buf + dev->ep0_rx_total_len - dev->ep0_rx_remaining_len, dev->ep0_rx_remaining_len);
     }
 }

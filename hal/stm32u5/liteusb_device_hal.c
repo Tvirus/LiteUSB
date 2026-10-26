@@ -11,10 +11,10 @@
 
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
-static unsigned int ep0_rx_total_len = 0;
-static unsigned int ep0_rx_remaining_len = 0;
-static uint8_t *ep0_rx_addr = NULL;
-static uint8_t ep0_rx_buf[LUSBD_MAX_PACKET_SIZE_EP0] __attribute__((aligned(4)));
+static uint8_t ep0_rx_need_copy = 0;
+static unsigned int ep0_rx_len = 0;
+static uint8_t *ep0_rx_buf = NULL;
+static uint8_t ep0_rx_tmp_buf[LUSBD_MAX_PACKET_SIZE_EP0] __attribute__((aligned(4)));
 
 
 int lusbd_hal_start_device(unsigned int dev_idx)
@@ -25,10 +25,17 @@ int lusbd_hal_start_device(unsigned int dev_idx)
         return -1;
     if (HAL_PCD_Start(&hpcd_USB_OTG_FS))
         return -1;
+
+    ep0_rx_need_copy = 0;
+    ep0_rx_len = 0;
+    ep0_rx_buf = NULL;
     return 0;
 }
 int lusbd_hal_stop_device(unsigned int dev_idx)
 {
+    ep0_rx_need_copy = 0;
+    ep0_rx_len = 0;
+    ep0_rx_buf = NULL;
     if (HAL_PCD_Stop(&hpcd_USB_OTG_FS))
         return -1;
     return 0;
@@ -47,6 +54,12 @@ int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int e
 {
     if (LUSBD_DIR_IN == dir)
         ep_num |= 0x80;
+    if (0 == ep_num)
+    {
+        ep0_rx_need_copy = 0;
+        ep0_rx_len = 0;
+        ep0_rx_buf = NULL;
+    }
     if (HAL_PCD_EP_SetStall(&hpcd_USB_OTG_FS, (uint8_t)ep_num))
         return -1;
     return 0;
@@ -63,6 +76,8 @@ int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int
 
 int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len)
 {
+    if ((0 == ep_num) && (hpcd_USB_OTG_FS.IN_ep[0].maxpacket < len))
+        return -1;
     if (HAL_PCD_EP_Transmit(&hpcd_USB_OTG_FS, ep_num, (uint8_t *)buf, len))
         return -1;
     return 0;
@@ -71,6 +86,9 @@ int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int ep_num, const void *buf, 
 int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
 {
     unsigned int mps;
+
+    if ((NULL == buf) && len)
+        return -1;
 
     if (ep_num)
     {
@@ -87,23 +105,30 @@ int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int ep_num, void *buf, unsign
     }
     else
     {
-        ep0_rx_total_len = len;
-        ep0_rx_remaining_len = len;
-        ep0_rx_addr = (uint8_t *)buf;
+        if (hpcd_USB_OTG_FS.OUT_ep[0].maxpacket < len)
+            return -1;
+
+        ep0_rx_buf = buf;
         if (0 == len)
         {
-            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, 0))
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_tmp_buf, 0))
                 return -1;
+            ep0_rx_need_copy = 0;
+            ep0_rx_len = 0;
         }
-        else if (LUSBD_MAX_PACKET_SIZE_EP0 > len)
+        else if (hpcd_USB_OTG_FS.OUT_ep[0].maxpacket > len)
         {
-            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0))
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_tmp_buf, hpcd_USB_OTG_FS.OUT_ep[0].maxpacket))
                 return -1;
+            ep0_rx_len = len;
+            ep0_rx_need_copy = 1;
         }
         else
         {
-            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, ep0_rx_addr, LUSBD_MAX_PACKET_SIZE_EP0))
+            if (HAL_PCD_EP_Receive(&hpcd_USB_OTG_FS, 0, buf, len))
                 return -1;
+            ep0_rx_need_copy = 0;
+            ep0_rx_len = 0;
         }
     }
     return 0;
@@ -272,6 +297,9 @@ void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
 
 void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
 {
+    ep0_rx_need_copy = 0;
+    ep0_rx_len = 0;
+    ep0_rx_buf = NULL;
 #if LUSBD_MAX_SPEED == LUSBD_HIGH_SPEED
     if (hpcd->Init.speed == PCD_SPEED_HIGH)
         lusbd_reset_handler(0, LUSBD_HIGH_SPEED);
@@ -290,6 +318,9 @@ void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
     CLEAR_IN_EP_INTR(0, USB_OTG_DIEPINT_EPDISD | USB_OTG_DIEPINT_XFRC);
     HAL_PCD_EP_Flush(hpcd, 0x80);
 
+    ep0_rx_need_copy = 0;
+    ep0_rx_len = 0;
+    ep0_rx_buf = NULL;
     lusbd_setup_handler(0, (uint8_t *)hpcd->Setup);
 }
 
@@ -310,38 +341,29 @@ void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
         return;
     }
 
-    if (LUSBD_MAX_PACKET_SIZE_EP0 < recv_len)
+    if (hpcd_USB_OTG_FS.OUT_ep[0].maxpacket < recv_len)
     {
         lusbd_ep_set_halt(0, 0, 0);
-        LUSBD_ERROR("STM32U5 ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, LUSBD_MAX_PACKET_SIZE_EP0);
+        LUSBD_ERROR("STM32U5 ep0 out packet len(%u) exceeds MPS(%u), ep0 halted", recv_len, hpcd_USB_OTG_FS.OUT_ep[0].maxpacket);
         return;
     }
-    if (ep0_rx_remaining_len < recv_len)
+
+    if (ep0_rx_need_copy)
     {
-        lusbd_ep_set_halt(0, 0, 0);
-        LUSBD_ERROR("STM32U5 ep0 recv len(%u) exceeds expected len(%u), ep0 halted",
-                    ep0_rx_total_len - ep0_rx_remaining_len + recv_len, ep0_rx_total_len);
-        return;
-    }
-    if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
-    {
-        if (ep0_rx_addr)
-            memcpy(ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, ep0_rx_buf, recv_len);
-        lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
-    }
-    else
-    {
-        if ((LUSBD_MAX_PACKET_SIZE_EP0 > recv_len) || (LUSBD_MAX_PACKET_SIZE_EP0 == ep0_rx_remaining_len))
+        ep0_rx_need_copy = 0;
+        if (ep0_rx_len > recv_len)
         {
-            lusbd_data_out_handler(0, 0, ep0_rx_addr, ep0_rx_total_len - ep0_rx_remaining_len + recv_len);
+            memcpy(ep0_rx_buf, ep0_rx_tmp_buf, recv_len);
+            lusbd_data_out_handler(0, 0, ep0_rx_buf, recv_len);
         }
         else
         {
-            ep0_rx_remaining_len -= LUSBD_MAX_PACKET_SIZE_EP0;
-            if (LUSBD_MAX_PACKET_SIZE_EP0 > ep0_rx_remaining_len)
-                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_buf, LUSBD_MAX_PACKET_SIZE_EP0);
-            else
-                HAL_PCD_EP_Receive(hpcd, 0, ep0_rx_addr + ep0_rx_total_len - ep0_rx_remaining_len, LUSBD_MAX_PACKET_SIZE_EP0);
+            memcpy(ep0_rx_buf, ep0_rx_tmp_buf, ep0_rx_len);
+            lusbd_data_out_handler(0, 0, ep0_rx_buf, ep0_rx_len);
         }
+    }
+    else
+    {
+        lusbd_data_out_handler(0, 0, ep0_rx_buf, recv_len);
     }
 }
