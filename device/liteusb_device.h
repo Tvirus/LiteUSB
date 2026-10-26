@@ -79,9 +79,9 @@ int lusbd_stop_device(unsigned int dev_idx);
 int lusbd_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num);
 int lusbd_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num);
 int lusbd_ep_send(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len, unsigned int need_zlp);
+int lusbd_ep0_send(unsigned int dev_idx, const void *buf, unsigned int len, unsigned int need_zlp);
 int lusbd_ep0_send_status(unsigned int dev_idx);
 int lusbd_ep_recv(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len);
-int lusbd_ep0_recv_status(unsigned int dev_idx);
 typedef void (*lusbd_control_out_cb_t)(unsigned int dev_idx, uint8_t *buf, unsigned int len, void *arg, void *class_data);
 int lusbd_ep0_recv(unsigned int dev_idx, void *buf, unsigned int len, lusbd_control_out_cb_t cb, void *arg, void *class_data);
 

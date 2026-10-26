@@ -405,10 +405,9 @@ static void acm_setup_cb(unsigned int dev_idx, const usb_setup_data_t *setup_dat
         }
 
         if (sizeof(cdcacmd->line_coding) < data_len)
-            lusbd_ep_send(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, sizeof(cdcacmd->line_coding), 1);
+            lusbd_ep0_send(dev_idx, (uint8_t *)&cdcacmd->line_coding, sizeof(cdcacmd->line_coding), 1);
         else
-            lusbd_ep_send(dev_idx, 0, (uint8_t *)&cdcacmd->line_coding, data_len, 0);
-        lusbd_ep0_recv_status(dev_idx);
+            lusbd_ep0_send(dev_idx, (uint8_t *)&cdcacmd->line_coding, data_len, 0);
         LUSBD_DEBUG("CDC-ACM(%u) recv GET_LINE_CODING", (unsigned int)class_data);
     }
     else if (COMM_IF_REQ_SET_CONTROL_LINE_STATE == setup_data->bRequest)
