@@ -874,7 +874,10 @@ int lusbd_ep0_send_status(unsigned int dev_idx)
 
 int lusbd_ep_recv(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
 {
-    if ((LUSBD_DEV_COUNT <= dev_idx) || ((NULL == buf) && len) || (((uintptr_t)buf) & 0x03))
+    if ((LUSBD_DEV_COUNT <= dev_idx) || (0 == ep_num) || (LUSBD_OUT_EP_MAX_NUM < ep_num) || (NULL == buf) || (((uintptr_t)buf) & 0x03) || (0 == len))
+        return -1;
+
+    if (0 == lusbd_dev_list[dev_idx].active_eps[1][ep_num].used)
         return -1;
     return lusbd_hal_ep_rx(dev_idx, ep_num, buf, len);
 }
