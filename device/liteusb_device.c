@@ -944,20 +944,26 @@ void lusbd_suspend_handler(unsigned int dev_idx)
 {
     if (LUSBD_DEV_COUNT <= dev_idx)
         return;
-    lusbd_dev_list[dev_idx].suspend = 1;
     LUSBD_DEBUG("Dev(%u) suspended", dev_idx);
-    if (lusbd_dev_list[dev_idx].user_cb)
-        lusbd_dev_list[dev_idx].user_cb(dev_idx, LUSBD_USER_EVENT_SUSPENDED);
+    if (0 == lusbd_dev_list[dev_idx].suspend)
+    {
+        lusbd_dev_list[dev_idx].suspend = 1;
+        if (lusbd_dev_list[dev_idx].user_cb)
+            lusbd_dev_list[dev_idx].user_cb(dev_idx, LUSBD_USER_EVENT_SUSPENDED);
+    }
 }
 
 void lusbd_resume_handler(unsigned int dev_idx)
 {
     if (LUSBD_DEV_COUNT <= dev_idx)
         return;
-    lusbd_dev_list[dev_idx].suspend = 0;
     LUSBD_DEBUG("Dev(%u) resumed", dev_idx);
-    if (lusbd_dev_list[dev_idx].user_cb)
-        lusbd_dev_list[dev_idx].user_cb(dev_idx, LUSBD_USER_EVENT_RESUMED);
+    if (lusbd_dev_list[dev_idx].suspend)
+    {
+        lusbd_dev_list[dev_idx].suspend = 0;
+        if (lusbd_dev_list[dev_idx].user_cb)
+            lusbd_dev_list[dev_idx].user_cb(dev_idx, LUSBD_USER_EVENT_RESUMED);
+    }
 }
 
 void lusbd_reset_handler(unsigned int dev_idx, unsigned int speed)
