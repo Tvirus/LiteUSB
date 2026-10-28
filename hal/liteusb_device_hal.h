@@ -12,6 +12,7 @@ int lusbd_hal_ep_set_halt(unsigned int dev_idx, unsigned int dir, unsigned int e
 int lusbd_hal_ep_clear_halt(unsigned int dev_idx, unsigned int dir, unsigned int ep_num);
 int lusbd_hal_ep_tx(unsigned int dev_idx, unsigned int ep_num, const void *buf, unsigned int len);
 int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len);
+int lusbd_hal_ep0_rx_setup(unsigned int dev_idx);
 int lusbd_hal_set_address(unsigned int dev_idx, unsigned int addr);
 int lusbd_hal_init_eps(unsigned int dev_idx, const lusbd_ep_t *out_ep_list, unsigned int out_ep_count, const lusbd_ep_t *in_ep_list, unsigned int in_ep_count);
 int lusbd_hal_set_remote_wakeup(unsigned int dev_idx, unsigned int enable);

@@ -866,7 +866,10 @@ int lusbd_ep0_send_status(unsigned int dev_idx)
     dev->need_zlp = 0;
     dev->ep0_tx_len = 0;
     dev->ep0_tx_buf = NULL;
-    return lusbd_hal_ep_tx(dev_idx, 0, NULL, 0);
+    if (lusbd_hal_ep_tx(dev_idx, 0, NULL, 0))
+        return -1;
+    lusbd_hal_ep0_rx_setup(dev_idx);
+    return 0;
 }
 
 int lusbd_ep_recv(unsigned int dev_idx, unsigned int ep_num, void *buf, unsigned int len)
@@ -885,8 +888,8 @@ int lusbd_ep0_recv(unsigned int dev_idx, void *buf, unsigned int len, lusbd_cont
     dev = &lusbd_dev_list[dev_idx];
 
     dev->ep0_rx_buf = buf;
-    dev->ep0_rx_total_len = len;
     dev->ep0_rx_remaining_len = len;
+    dev->ep0_rx_total_len = len;
     dev->control_out_class_data = class_data;
     dev->control_out_arg = arg;
     dev->control_out_cb = cb;
@@ -1237,6 +1240,7 @@ static void setup_set_address(unsigned int dev_idx, const usb_setup_data_t *setu
         return;
     }
 
+    /* HAL changes device address after the Status stage */
     lusbd_hal_set_address(dev_idx, addr);
     lusbd_ep0_send_status(dev_idx);
     if (0 == addr)
@@ -1818,7 +1822,10 @@ void lusbd_data_out_handler(unsigned int dev_idx, unsigned int ep_num, uint8_t *
     }
 
     if (NULL == buf)
+    {
+        lusbd_hal_ep0_rx_setup(dev_idx);
         return;
+    }
     if (LUSBD_MAX_PACKET_SIZE_EP0 < recv_len)
     {
         lusbd_ep_set_halt(0, 0, 0);

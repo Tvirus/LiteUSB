@@ -134,6 +134,11 @@ int lusbd_hal_ep_rx(unsigned int dev_idx, unsigned int ep_num, void *buf, unsign
     return 0;
 }
 
+int lusbd_hal_ep0_rx_setup(unsigned int dev_idx)
+{
+    return 0;
+}
+
 int lusbd_hal_set_address(unsigned int dev_idx, unsigned int addr)
 {
     if (HAL_PCD_SetAddress(&hpcd_USB_OTG_FS, addr))
@@ -351,7 +356,7 @@ void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
     if (ep0_rx_need_copy)
     {
         ep0_rx_need_copy = 0;
-        if (ep0_rx_len > recv_len)
+        if (ep0_rx_len >= recv_len)
         {
             memcpy(ep0_rx_buf, ep0_rx_tmp_buf, recv_len);
             lusbd_data_out_handler(0, 0, ep0_rx_buf, recv_len);
